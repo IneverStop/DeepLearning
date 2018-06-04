@@ -1,0 +1,86 @@
+import tensorflow as tf
+import resnet
+import matplotlib.pyplot as plt
+import utils
+import numpy as np
+import os
+
+path = os.getcwd()
+img_path = path + '\\image\\'
+log_path = path + '\\param\\weights.ckpt'
+result_path = path + '\\result'
+
+batch_size = 128
+image_width = 32
+image_height = 32
+test_size = 256
+num_of_class = 100
+learning_rate = 0.01
+generations = 1000000
+test_every = 5
+log_every = 500
+
+
+def main(_):
+    train_image, train_label, test_image, test_label = utils.openfile(img_path)
+
+    train_input = tf.placeholder(shape=[batch_size, image_width, image_height, 3], dtype=tf.float32)
+    train_target = tf.placeholder(shape=[batch_size], dtype=tf.int32)
+    test_input = tf.placeholder(shape=[test_size, image_width, image_height, 3], dtype=tf.float32)
+
+    layer_info = {'conv2': {'length': 3, 'nums': [64, 64, 256]},
+                  'conv3': {'length': 4, 'nums': [128, 128, 512]},
+                  'conv4': {'length': 6, 'nums': [256, 256, 1024]},
+                  'conv5': {'length': 3, 'nums': [512, 512, 2048]}}
+    train_output = resnet.Resnet(50, train_input, layer_info, num_of_class).fc
+    test_output = resnet.Resnet(50, test_input, layer_info, num_of_class).fc
+
+    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=train_output, labels=train_target))
+    train_step = tf.train.MomentumOptimizer(learning_rate, 0.9).minimize(loss)
+
+    prediction = tf.nn.softmax(train_output)
+    test_prediction = tf.nn.softmax(test_output)
+
+    saver = tf.train.Saver()
+
+    train_loss = []
+    train_acc = []
+    test_acc = []
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        for i in range(generations):
+            if i == 0:
+                saver.restore(sess, log_path)
+            train_inputs, train_labels = utils.get_batch_data(train_image, train_label, batch_size)
+            dicts = {train_input: train_inputs, train_target: train_labels}
+            sess.run(train_step, feed_dict=dicts)
+            temp_train_loss, temp_train_prediction = sess.run([loss, prediction], feed_dict=dicts)
+            temp_train_acc = utils.get_accuracy(temp_train_prediction, train_labels)
+            if (i + 1) % test_every == 0:
+                test_inputs, test_labels = utils.get_batch_data(test_image, test_label, test_size)
+                test_dict = {test_input: test_inputs}
+                temp_test_prediction = sess.run(test_prediction, feed_dict=test_dict)
+                temp_test_acc = utils.get_accuracy(temp_test_prediction, test_labels)
+                train_loss.append(temp_train_loss)
+                train_acc.append(temp_train_acc)
+                test_acc.append(temp_test_acc)
+                temp_prints = [(i + 1), temp_train_loss, temp_train_acc, temp_test_acc]
+                temp_prints = [np.round(x, 2) for x in temp_prints]
+                print('Generation #{}. Train Loss:{:.2f}. Train Acc (Test Acc):{:.2f} ({:.2f})'.format(*temp_prints))
+            if (i+1) % log_every == 0:
+                saver.save(sess, log_path)
+
+        eval_indices = range(0, generations, test_every)
+        plt.plot(eval_indices, train_loss, 'k-')
+        foo = plt.gcf()
+        foo.savefig(result_path+'\\loss.jpg')
+        plt.plot(eval_indices, train_acc, 'k-', label='Train Set Accuracy')
+        plt.plot(eval_indices, test_acc, 'r--', label='Test Set Accuracy')
+        plt.legend(loc='lower right')
+        foo = plt.gcf()
+        foo.savefig(result_path+'\\acc.jpg')
+        plt.close()
+
+
+if __name__ == '__main__':
+    tf.app.run()
